@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const GEMINI_URL =
-  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+const DEEPSEEK_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 export async function POST(req: NextRequest) {
   const { datasetSummary } = await req.json()
@@ -23,25 +22,34 @@ Use pandas, scikit-learn. Return only Python code. No markdown or explanations.
 `
 
   try {
-    const res = await fetch(`${GEMINI_URL}?key=${process.env.GEMINI_API_KEY}`, {
+    const res = await fetch(DEEPSEEK_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "http://localhost:3000/", // or your deployed domain
+        "X-Title": "ML Code Generator"
+      },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        model: "deepseek/deepseek-r1-0528", // DeepSeek R1 model name on OpenRouter
+        messages: [
+          { role: "system", content: "You are an expert ML engineer." },
+          { role: "user", content: prompt }
+        ],
+        max_tokens: 4096
       }),
     });
     const data = await res.json();
-    console.log("Gemini API response:", JSON.stringify(data, null, 2));
-    // If Gemini returns an error, omit the response
+    console.log("DeepSeek API response:", JSON.stringify(data, null, 2));
     if (data.error) {
-      // Only log the error, do not send to frontend
-      console.warn("Gemini API error (omitted from frontend):", data.error);
+      console.warn("DeepSeek API error (omitted from frontend):", data.error);
       return NextResponse.json({ code: "" });
     }
-    const code = data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    // DeepSeek returns code in data.choices[0].message.content
+    const code = data?.choices?.[0]?.message?.content || "";
     return NextResponse.json({ code });
   } catch (err) {
-    console.error("Gemini API error:", err);
-    return NextResponse.json({ code: "Gemini API error. Check server logs." }, { status: 500 });
+    console.error("DeepSeek API error:", err);
+    return NextResponse.json({ code: "DeepSeek API error. Check server logs." }, { status: 500 });
   }
 }

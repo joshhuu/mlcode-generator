@@ -1,187 +1,182 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Upload, FileText, Database, Code, MessageSquare, Download, Copy, Send, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { ScrollArea } from "@/components/ui/scroll-area"
-
+import { useState } from "react";
+import {
+  Upload,
+  FileText,
+  Database,
+  Code,
+  MessageSquare,
+  Download,
+  Copy,
+  Send,
+  X,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import papa from "papaparse";
 interface CSVInfo {
-  filename: string
+  filename: string;
   columns: Array<{
-    name: string
-    type: string
-    nulls: number
-  }>
-  rows: number
-  suggestedTarget: string
+    name: string;
+    type: string;
+    nulls: number;
+  }>;
+  rows: number;
+  suggestedTarget: string;
 }
 
 interface CodeSection {
-  title: string
-  description: string
-  code: string
+  title: string;
+  description: string;
+  code: string;
 }
 
 interface ChatMessage {
-  id: string
-  type: "user" | "assistant"
-  content: string
-  timestamp: Date
+  id: string;
+  type: "user" | "assistant";
+  content: string;
+  timestamp: Date;
 }
 
 export default function MLDashboard() {
-  const [file, setFile] = useState<File | null>(null)
-  const [csvInfo, setCsvInfo] = useState<CSVInfo | null>(null)
-  const [codeSections, setCodeSections] = useState<CodeSection[]>([])
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
-  const [chatInput, setChatInput] = useState("")
-  const [isChatOpen, setIsChatOpen] = useState(false)
+  const handleSubmit = () => {
+    if (file) {
+      handleFileUpload(file);
+    }
+  };
+  const [file, setFile] = useState<File | null>(null);
+  const [csvInfo, setCsvInfo] = useState<CSVInfo | null>(null);
+  const [codeSections, setCodeSections] = useState<CodeSection[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   const handleFileUpload = (uploadedFile: File) => {
-    setFile(uploadedFile)
-    // Simulate CSV analysis
-    setTimeout(() => {
-      setCsvInfo({
-        filename: uploadedFile.name,
-        columns: [
-          { name: "age", type: "int64", nulls: 0 },
-          { name: "income", type: "float64", nulls: 12 },
-          { name: "education", type: "object", nulls: 3 },
-          { name: "target", type: "int64", nulls: 0 },
-        ],
-        rows: 1000,
-        suggestedTarget: "target",
-      })
-    }, 1000)
+  // ✅ Validate the uploaded file first
+  if (!uploadedFile || !(uploadedFile instanceof File)) {
+    console.error("❌ Invalid file input.")
+    return
   }
 
-  const handleSubmit = async () => {
-    if (!file) return
+  setFile(uploadedFile)
 
-    setIsProcessing(true)
+  papa.parse(uploadedFile, {
+    header: true,
+    skipEmptyLines: true,
+    complete: async (results) => {
+      const parsedRows = results.data
+      console.log("✅ Parsed rows from CSV:", parsedRows)
 
-    // Simulate AI code generation
-    setTimeout(() => {
-      setCodeSections([
-        {
-          title: "Exploratory Data Analysis",
-          description: "Initial data exploration and visualization",
-          code: `import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
+      if (!Array.isArray(parsedRows) || parsedRows.length === 0 || Object.keys(parsedRows[0]).length === 0) {
+        console.error("❌ CSV parsing failed — empty or invalid format.")
+        alert("Failed to parse CSV. Please check the file format.")
+        return
+      }
 
-# Load the dataset
-df = pd.read_csv('${file.name}')
+      try {
+        const res = await fetch("/api/analyze-dataset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rows: parsedRows }),
+        })
 
-# Basic information
-print(df.info())
-print(df.describe())
+        if (!res.ok) {
+          throw new Error("API error: " + res.status)
+        }
 
-# Check for missing values
-print(df.isnull().sum())
+        const summary = await res.json()
+        console.log("✅ Dataset summary from backend:", summary)
 
-# Visualizations
-plt.figure(figsize=(12, 8))
-sns.heatmap(df.corr(), annot=True, cmap='coolwarm')
-plt.title('Correlation Matrix')
-plt.show()`,
-        },
-        {
-          title: "Data Preprocessing",
-          description: "Clean and prepare data for modeling",
-          code: `from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.model_selection import train_test_split
+        setCsvInfo({
+          filename: uploadedFile.name,
+          columns: summary.columns.map((col: any) => ({
+            name: col.name,
+            type: col.type,
+            nulls: col.missing_percentage,
+          })),
+          rows: summary.num_rows,
+          suggestedTarget: summary.suggested_target,
+        })
 
-# Handle missing values
-df['income'].fillna(df['income'].median(), inplace=True)
-df['education'].fillna(df['education'].mode()[0], inplace=True)
-
-# Encode categorical variables
-le = LabelEncoder()
-df['education'] = le.fit_transform(df['education'])
-
-# Split features and target
-X = df.drop('target', axis=1)
-y = df['target']
-
-# Split the data
-X_train, X_test, y_train, y_test = train_test_split(
-    X, y, test_size=0.2, random_state=42
-)
-
-# Scale features
-scaler = StandardScaler()
-X_train_scaled = scaler.fit_transform(X_train)
-X_test_scaled = scaler.transform(X_test)`,
-        },
-        {
-          title: "Model Training",
-          description: "Train and evaluate machine learning models",
-          code: `from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score, classification_report
-
-# Initialize and train the model
-model = RandomForestClassifier(n_estimators=100, random_state=42)
-model.fit(X_train_scaled, y_train)
-
-# Make predictions
-y_pred = model.predict(X_test_scaled)
-
-# Evaluate the model
-accuracy = accuracy_score(y_test, y_pred)
-print(f'Accuracy: {accuracy:.4f}')
-print('\\nClassification Report:')
-print(classification_report(y_test, y_pred))
-
-# Feature importance
-feature_importance = pd.DataFrame({
-    'feature': X.columns,
-    'importance': model.feature_importances_
-}).sort_values('importance', ascending=False)
-
-print('\\nFeature Importance:')
-print(feature_importance)`,
-        },
-      ])
-      setIsProcessing(false)
-    }, 2000)
-  }
+        // Send summary to Gemini via /api/generate-code
+        try {
+          const codeRes = await fetch("/api/generate-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ datasetSummary: summary }),
+          });
+          if (!codeRes.ok) {
+            throw new Error("Gemini API error: " + codeRes.status);
+          }
+          const codeData = await codeRes.json();
+          setCodeSections([
+            {
+              title: "ML Pipeline",
+              description: "Generated by Gemini based on your dataset.",
+              code: codeData.code || "No code returned.",
+            },
+          ]);
+        } catch (err) {
+          console.error("❌ Error getting code from Gemini:", err);
+          alert("There was a problem generating code from Gemini.");
+        }
+      } catch (err) {
+        console.error("❌ Error analyzing dataset:", err)
+        alert("There was a problem analyzing the CSV.")
+      }
+    },
+    error: (err) => {
+      console.error("❌ PapaParse error:", err)
+      alert("CSV parsing failed.")
+    },
+  })
+}
 
   const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text)
-  }
+    navigator.clipboard.writeText(text);
+  };
 
   const downloadFullPipeline = () => {
     const fullCode = codeSections
-      .map((section) => `# ${section.title}\n# ${section.description}\n\n${section.code}\n\n`)
-      .join("")
+      .map(
+        (section) =>
+          `# ${section.title}\n# ${section.description}\n\n${section.code}\n\n`
+      )
+      .join("");
 
-    const blob = new Blob([fullCode], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = "ml_pipeline.py"
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+    const blob = new Blob([fullCode], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "ml_pipeline.py";
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const sendChatMessage = () => {
-    if (!chatInput.trim()) return
+    if (!chatInput.trim()) return;
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       type: "user",
       content: chatInput,
       timestamp: new Date(),
-    }
+    };
 
-    setChatMessages((prev) => [...prev, userMessage])
-    setChatInput("")
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput("");
 
     // Simulate AI response
     setTimeout(() => {
@@ -190,10 +185,10 @@ print(feature_importance)`,
         type: "assistant",
         content: `I'll help you ${chatInput.toLowerCase()}. Here's the updated code section that addresses your request.`,
         timestamp: new Date(),
-      }
-      setChatMessages((prev) => [...prev, assistantMessage])
-    }, 1000)
-  }
+      };
+      setChatMessages((prev) => [...prev, assistantMessage]);
+    }, 1000);
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -205,7 +200,9 @@ print(feature_importance)`,
               <div className="h-8 w-8 rounded-lg bg-blue-600 flex items-center justify-center">
                 <Code className="h-5 w-5 text-white" />
               </div>
-              <h1 className="text-xl font-semibold text-gray-900">ML Code Generator</h1>
+              <h1 className="text-xl font-semibold text-gray-900">
+                ML Code Generator
+              </h1>
             </div>
             <Button
               variant="outline"
@@ -232,17 +229,18 @@ print(feature_importance)`,
                   <span>Upload Dataset</span>
                 </CardTitle>
                 <CardDescription>
-                  Upload your CSV file to generate tailored Python code for machine learning
+                  Upload your CSV file to generate tailored Python code for
+                  machine learning
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div
                   className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center hover:border-gray-400 transition-colors cursor-pointer"
                   onDrop={(e) => {
-                    e.preventDefault()
-                    const droppedFile = e.dataTransfer.files[0]
+                    e.preventDefault();
+                    const droppedFile = e.dataTransfer.files[0];
                     if (droppedFile && droppedFile.type === "text/csv") {
-                      handleFileUpload(droppedFile)
+                      handleFileUpload(droppedFile);
                     }
                   }}
                   onDragOver={(e) => e.preventDefault()}
@@ -250,8 +248,12 @@ print(feature_importance)`,
                   {file ? (
                     <div className="space-y-2">
                       <FileText className="h-12 w-12 text-green-500 mx-auto" />
-                      <p className="text-sm font-medium text-gray-900">{file.name}</p>
-                      <p className="text-xs text-gray-500">{(file.size / 1024 / 1024).toFixed(2)} MB</p>
+                      <p className="text-sm font-medium text-gray-900">
+                        {file.name}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {(file.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
                     </div>
                   ) : (
                     <div className="space-y-4">
@@ -266,13 +268,16 @@ print(feature_importance)`,
                               accept=".csv"
                               className="hidden"
                               onChange={(e) => {
-                                const selectedFile = e.target.files?.[0]
-                                if (selectedFile) handleFileUpload(selectedFile)
+                                const selectedFile = e.target.files?.[0];
+                                if (selectedFile)
+                                  handleFileUpload(selectedFile);
                               }}
                             />
                           </label>
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">CSV files up to 10MB</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          CSV files up to 10MB
+                        </p>
                       </div>
                     </div>
                   )}
@@ -300,7 +305,9 @@ print(feature_importance)`,
                 <CardContent>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div>
-                      <h4 className="font-medium text-gray-900 mb-3">Basic Info</h4>
+                      <h4 className="font-medium text-gray-900 mb-3">
+                        Basic Info
+                      </h4>
                       <div className="space-y-2 text-sm">
                         <div className="flex justify-between">
                           <span className="text-gray-600">Filename:</span>
@@ -308,31 +315,49 @@ print(feature_importance)`,
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">Rows:</span>
-                          <span className="font-mono">{csvInfo.rows.toLocaleString()}</span>
+                          <span className="font-mono">
+                            {csvInfo.rows.toLocaleString()}
+                          </span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-600">Columns:</span>
-                          <span className="font-mono">{csvInfo.columns.length}</span>
+                          <span className="font-mono">
+                            {csvInfo.columns.length}
+                          </span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-gray-600">Suggested Target:</span>
-                          <Badge variant="secondary">{csvInfo.suggestedTarget}</Badge>
+                          <span className="text-gray-600">
+                            Suggested Target:
+                          </span>
+                          <Badge variant="secondary">
+                            {csvInfo.suggestedTarget}
+                          </Badge>
                         </div>
                       </div>
                     </div>
 
                     <div>
-                      <h4 className="font-medium text-gray-900 mb-3">Columns</h4>
+                      <h4 className="font-medium text-gray-900 mb-3">
+                        Columns
+                      </h4>
                       <div className="space-y-2">
                         {csvInfo.columns.map((col, index) => (
-                          <div key={index} className="flex items-center justify-between text-sm">
-                            <span className="font-mono text-gray-900">{col.name}</span>
+                          <div
+                            key={index}
+                            className="flex items-center justify-between text-sm"
+                          >
+                            <span className="font-mono text-gray-900">
+                              {col.name}
+                            </span>
                             <div className="flex items-center space-x-2">
                               <Badge variant="outline" className="text-xs">
                                 {col.type}
                               </Badge>
                               {col.nulls > 0 && (
-                                <Badge variant="destructive" className="text-xs">
+                                <Badge
+                                  variant="destructive"
+                                  className="text-xs"
+                                >
                                   {col.nulls} nulls
                                 </Badge>
                               )}
@@ -350,8 +375,13 @@ print(feature_importance)`,
             {codeSections.length > 0 && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-lg font-semibold text-gray-900">Generated Code</h2>
-                  <Button onClick={downloadFullPipeline} className="flex items-center space-x-2">
+                  <h2 className="text-lg font-semibold text-gray-900">
+                    Generated Code
+                  </h2>
+                  <Button
+                    onClick={downloadFullPipeline}
+                    className="flex items-center space-x-2"
+                  >
                     <Download className="h-4 w-4" />
                     <span>Download Full Pipeline</span>
                   </Button>
@@ -362,8 +392,12 @@ print(feature_importance)`,
                     <CardHeader>
                       <div className="flex items-center justify-between">
                         <div>
-                          <CardTitle className="text-base">{section.title}</CardTitle>
-                          <CardDescription>{section.description}</CardDescription>
+                          <CardTitle className="text-base">
+                            {section.title}
+                          </CardTitle>
+                          <CardDescription>
+                            {section.description}
+                          </CardDescription>
                         </div>
                         <Button
                           variant="outline"
@@ -395,7 +429,11 @@ print(feature_importance)`,
           <Card className="w-full max-w-md h-96 flex flex-col">
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-base">Chat Assistant</CardTitle>
-              <Button variant="ghost" size="sm" onClick={() => setIsChatOpen(false)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsChatOpen(false)}
+              >
                 <X className="h-4 w-4" />
               </Button>
             </CardHeader>
@@ -412,11 +450,17 @@ print(feature_importance)`,
                     chatMessages.map((message) => (
                       <div
                         key={message.id}
-                        className={`flex ${message.type === "user" ? "justify-end" : "justify-start"}`}
+                        className={`flex ${
+                          message.type === "user"
+                            ? "justify-end"
+                            : "justify-start"
+                        }`}
                       >
                         <div
                           className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
-                            message.type === "user" ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-900"
+                            message.type === "user"
+                              ? "bg-blue-600 text-white"
+                              : "bg-gray-100 text-gray-900"
                           }`}
                         >
                           {message.content}
@@ -446,5 +490,5 @@ print(feature_importance)`,
         </div>
       )}
     </div>
-  )
+  );
 }
